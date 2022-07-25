@@ -1,7 +1,12 @@
+import json
+
 import pytest
 import requests
+from requests.exceptions import HTTPError
 
 from src.config import Settings
+from src.holiday import Holiday
+from src.main import get_holidays
 
 holidays_json = {
     "status": 200,
@@ -35,44 +40,52 @@ holidays_json = {
 holidays_error_json = {
     "status": 400,
     "requests": {
-        "used": 42,
-        "available": 9958,
+        "used": 68,
+        "available": 9932,
         "resets": "2022-08-01 00:00:00"
     },
-    "error": "The requested country (INVALID_COUNTRY_CODE) is invalid. For more information, please visit https:\/\/holidayapi.com\/docs"
+    "error": "The requested country (TSD) is invalid. For more information, please visit https:\/\/holidayapi.com\/docs"
 }
 
-key = Settings.API_KEY
+api_key = Settings.API_KEY
 
 
 @pytest.mark.parametrize(
-    "country_code, expected_status, expected_json",
+    "key, country_code, year, expected_status",
     [
-        ("TR", 200, holidays_json),
-        ("INVALID_COUNTRY_CODE", 400, holidays_error_json)
+        (api_key, "TR", 2021, 200),  # Successful req. for TR
+        (api_key, "XY", 2021, 400),  # Unsuccessful req. with invalid "country_code"
+        ("12345", "UK", 2021, 403),  # Unsuccessful req. with invalid "api_key"
+        (api_key, "FR", 2022, 402),  # Unsuccessful req. bcs it is a free api account, so we can
+        # only see last year's holidays
     ],
 )
-def test_get_holidays(country_code, expected_status, expected_json, mocker):
+def test_holiday_requests(key, country_code, year, expected_status, mocker):
     mock = mocker.patch("src.main.requests.get")
-    mock.return_value.json = expected_json
     mock.return_value.status_code = expected_status
 
     req = requests.get(f"{Settings.API_URL}/holidays",
                        params={"key": key, "country": country_code})
 
-    assert req.json == expected_json
     assert req.status_code == expected_status
 
 
+def test_get_holidays_success(mocker):
+    mock = mocker.patch("src.main.requests.get")
+    mock.return_value.status_code = 200
+    mock.return_value.content = json.dumps(holidays_json).encode('utf-8')
+
+    holidays: list[Holiday] = get_holidays()
+
+    assert len(holidays) == 1
+    assert holidays[0].name == "New Year's Day"
+
+
 # def test_get_holidays_fail(mocker):
-#     country = "INVALID_COUNTRY_CODE"
-#
 #     mock = mocker.patch("src.main.requests.get")
-#     mock.return_value.json = holidays_error_json
 #     mock.return_value.status_code = 400
 #
-#     req = requests.get(f"{Settings.API_URL}/holidays",
-#                        params={"key": key, "country": country})
-#
-#     assert req.status_code == 400
-#     assert req.json == holidays_error_json
+#     try:
+#         holidays = get_holidays()
+#     except HTTPError as e:
+#         assert e.response.status_code == 400
